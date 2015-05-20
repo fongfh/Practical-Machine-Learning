@@ -1,0 +1,190 @@
+---
+output: html_document
+---
+# Project: Practical Machine Learning  
+# Analysis and Prediction of Data
+
+*Fong FH 19 May 2015*
+
+## 1. Synopsis
+
+The goal of your project is to predict the manner in which they did the exercise. This is the **classe** variable in the training set. We make use any of the other variables in the dataset to predict the outcome of the **classe** variable through building a model. We used cross validation techniques to generate and compute the model efficiencies and out of sample error. Finally we test our prediction model through using it to predict 20 different test cases. 
+
+## 2. Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+## 3. Data Processing
+
+The data for this assignment come in the form of comma-separated-value files. They can be downloaded from the following web site:
+
+**Training Data:** (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv). The file is about 12Mb in size. 
+
+**Data for Test Cases:** (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv). This data consist of 20 sets that we need to use to predict the outcome of the **classe** variable.
+
+Detailed documentation of the data available at (http://groupware.les.inf.puc-rio.br/har). Here we can find details of how the tests were performed by the six test candidates.
+
+
+### 3.1 Reading Data
+
+To start the analysis, we read the training data files. We assume that the files are stored in the current R working directory. 
+
+```{r read in the csv file, message=FALSE}
+# read in data file, replace the NA and blank spaces with NAs
+pml_train <- read.csv("pml-training.csv", header=T, na.strings=c("","NA"))
+
+library (rpart); library (rpart.plot);library (caret);library (caTools);library (randomForest)
+options(scipen=9, digits=2) 
+
+```
+
+
+### 3.2 Tidying Data
+
+The data file contains many columns that were filled with NAs and blanks. For all of these we replace them with NAs throughout. In addition we remove the first seven columns of the data as they contain names, time and related informatio which are not useful for building the prediction model. Finally we remove all the columns of the training data set that contain NAs. 
+
+```{r tidy data, message=FALSE}
+pml_train <- subset( pml_train, select = -c( 1 : 7 )) # remove columns 1 to 7
+pml_train <- pml_train[,colSums(is.na(pml_train))<19216] # remove columns with NAs
+
+```
+
+
+The resultant training data frame consist of `r nrow(pml_train)` observations in `r ncol(pml_train)` variables.
+
+
+## 4. Prediction Models
+
+### 4.1 Splitting Training Dataset
+
+In order to test the accuracy of a prediction model we split the dataset into **training** and **testing** data sets.
+
+```{r split data to training and testing data, message=FALSE}
+set.seed (1000)
+split = sample.split (pml_train$classe, SplitRatio=0.5)
+train = subset(pml_train, split==TRUE)
+test = subset(pml_train, split==FALSE)
+```
+
+
+### 4.2 CART Prediction Model
+
+Next we extract only the relevant fields from the dataset and create two data frames for the total fatalities and injuries that arise from the environmental events.
+
+```{r Generate CART model, message=FALSE}
+# Generating CART model using pml_train  
+# pml_train_tree <- rpart (classe ~., data=pml_train, method="class", control=rpart.control(minsplit=20, cp=0, xval=10))
+pml_train_tree<-train(classe~.,data=train, method="rpart", trControl=trainControl(method="cv",number=20), tuneGrid=expand.grid(.cp=0))
+pml_train_tree
+```
+
+The CART model can be used to predict the **classe** variable from the test data that we had split earlier.
+
+```{r Predict using CART modell}
+predict_classe = predict (pml_train_tree, newdata=test)
+
+```
+
+We can compute the confusion matrix of the CART model as follows.
+
+```{r CART Confusiom Matrix, echo=FALSE}
+table (test$classe, predict_classe) # Confusion Matrix
+```
+
+The CART model was run with **20-fold cross-validation** on the training data set to improve model accuracy. The resultant accuracy on the testing data set can be obtained from the confusion matrix. We can see that the accuracy of the CART model is **`r ((2687+1687+1570+1472+1700)/nrow(test))*100`%** which also means that the **out-of-sample error** is **`r 100-((2687+1687+1570+1472+1700)/nrow(test))*100`%**.
+
+### 4.3 Random Forest Prediction Model
+
+We can try to improve our prediction model through buiding a Random Forest model as follows. 
+
+```{r Create a random forest model, message=FALSE}
+rf_model <- randomForest(classe ~ ., data = train, mtry = 2, importance = TRUE, do.trace = 100)
+
+```
+
+
+```{r Print random forest model, message=FALSE, echo=FALSE}
+print(rf_model)
+
+``````
+
+We note that from the nature of Random Forest models, there is no need for cross-validation to get an unbiased estimate of the test set error. It is estimated through the **OOB error** estimate of the rate (above).
+
+To see the number of time each of the variables are selected for tree splitting, we can plot the following. We can see that **yaw_belt** is used most frequently, followed by **pitch_belt**, **magnet_dumbell_z** and so on. The next plot below shows the variable importance information in the random forest model. 
+
+```{r plot the variable frequencies, fig.width=7, fig.height=3.8, echo=FALSE}
+vu = varUsed(rf_model, count=TRUE)
+vusorted = sort(vu, decreasing = FALSE, index.return = TRUE)
+dotchart(vusorted$x, names(rf_model$forest$xlevels[vusorted$ix]),cex=0.6, xlab="Number of times variable used for splitting")
+
+```
+
+
+```{r plot variable importance, fig.width=7, fig.height=3.5, echo=FALSE}
+varImpPlot(rf_model, scale=FALSE, cex=0.7, main=NULL)
+
+```
+
+With the random forest model, we can test it against the test data set we splitted in section 4.1. The resultant confusion matrix is below.
+
+```{r testing the random forest model against the test data, echo=FALSE}
+predictForest = predict (rf_model, newdata=test)
+table (test$classe, predictForest)
+
+```
+
+From the confusion matrix, we can see that the accuracy of the random forest model is **`r ((2789+1865+1698+1575+1800)/nrow(test))*100`%**. The **out-of-sample error** is **`r 100-((2789+1865+1698+1575+1800)/nrow(test))*100`%**.
+
+This is a significant improvement over the CART model in terms of out-of-sample errors on the testing data set.
+
+
+# 5. Predicting Test Cases
+
+We can now proceed to use both the CART and Random Forest models to predict the **classe** variable for each of the 20 test cases in the *pml_test* dataset.
+
+The test cases can be read in as follows.
+
+```{r predict the 29 test sets in this projectl}
+pml_test = read.csv ("pml-testing.csv") # read in test cases
+
+```
+
+The test data set consist of `r nrow(pml_test)` observations in `r ncol(pml_test)` variables.
+
+We can now do a prediction of the 20 test cases using the CART model we had generated.
+
+```{r predict the 29 test sets with CART}
+predict_classe = predict (pml_train_tree, newdata=pml_test) # predict with CART
+
+```
+
+```{r print CART test case results, echo=FALSE}
+predict_classe
+
+```
+
+Next, we perform predictions of the same 20 test cases using the Random Forest model.
+
+```{r predict the 20 test sets with Random Forest}
+predictForest = predict (rf_model, newdata=pml_test) # predict with random forest
+
+```
+
+```{r print the 20 test sets with Random Forest, echo=FALSE}
+predictForest
+
+```
+
+We can see that the CART and Random Forest models gave slightly different prediction result. 
+
+The Random Forest predicted values of **classe** was correct for all of the 20 test cases. The CART model resulted in two prediction errors which translates to an error rate of 10%.
+
+Thus the Random Forest model is more accurate over the CART model.
+
+# 6. Conclusion
+This report showed that data prediction models can be built to accurately predict the outcomes of different data sets. In data prediction, we partioned the data in training and testing sets. The prediction model is developed using the training data while the testing data set is used to quantitfy the accuracy of the model on real data. Both **CART** and **Random Forest** models were built. For CART models, we used **multiple-folds cross-validation** to improve the model accuracy. 
+
+We have used both CART and Random Forest models to predict the 20 test cases. It was found that the Random Forest model built was able to predict all the 20 test cases accurately!
+
+
+
